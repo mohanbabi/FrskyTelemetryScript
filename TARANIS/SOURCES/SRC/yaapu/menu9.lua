@@ -195,7 +195,7 @@ local menuItems = {
   {"center panel layout:", "CPANE", 1, { "def", "min" }, { 1, 2 } },
   {"right panel layout:", "RPANE", 1, { "def", "min","heli" }, { 1, 2, 3 } },
   {"left panel layout:", "LPANE", 1, { "def","m2f" }, { 1, 2 } },
-  {"alternate view layout:", "AVIEW", 1, { "def" }, { 1 } },
+  {"alternate view layout:", "AVIEW", 1, { "def", "heli" }, { 1, 2 } },
   {"enable px4 flightmodes:", "PX4", 1, { "no", "yes" }, { false, true } },
   {"enable CRSF:", "CRSF", 1, { "no", "yes" }, { false, true } },
 }
@@ -209,7 +209,7 @@ local menu  = {
 local centerPanelFiles = {"hud9","hud9_min"}
 local rightPanelFiles = {"right9","right9_min","right9_heli"}
 local leftPanelFiles = {"left9","left9_m2f"}
-local altViewFiles = {"alt9_view"}
+local altViewFiles = {"alt9_view","heli9_view"}
 
 ------------------------------------------
 -- returns item's VALUE,LABEL,IDX
@@ -327,7 +327,7 @@ end
 local function drawConfigMenuBars()
   local itemIdx = string.format("%d/%d",menu.selectedItem,#menuItems)
   lcd.drawFilledRectangle(0,0, 212, 7, SOLID)
-  lcd.drawText(0,0,"Yaapu 1.9.4_b1".." ("..'6f7d99a'..")",SMLSIZE+INVERS)
+  lcd.drawText(0,0,"Yaapu 1.9.5dev",SMLSIZE+INVERS)
   lcd.drawFilledRectangle(0,56, 212, 8, SOLID)
   lcd.drawText(0,56+1,getConfigFilename(),SMLSIZE+INVERS)
   lcd.drawText(212,56+1,itemIdx,SMLSIZE+INVERS+RIGHT)

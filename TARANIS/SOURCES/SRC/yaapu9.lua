@@ -785,7 +785,7 @@ local function processTelemetry(DATA_ID, VALUE,now)
     telemetry.failsafe = bit32.extract(VALUE,12,1)
     telemetry.fencePresent = bit32.extract(VALUE,13,1)
     telemetry.fenceBreached = telemetry.fencePresent == 1 and bit32.extract(VALUE,14,1) or 0 -- we ignore fence breach if fence is disabled
-    telemetry.throttle = bit32.extract(VALUE,19,7)
+    telemetry.throttle = math.floor(0.5 + (bit32.extract(VALUE,19,6) * (bit32.extract(VALUE,25,1) == 1 and -1 or 1) * 1.58)) -- signed throttle [-63,63] -> [-100,100]
     -- IMU temperature: 0 means temp =< 19°, 63 means temp => 82°
     telemetry.imuTemp = bit32.extract(VALUE,26,6) + 19 -- C°
   elseif DATA_ID == 0x5002 then -- GPS STATUS
@@ -894,6 +894,7 @@ end
 
 
 local function crossfirePop()
+    local now = getTime()
     local command, data = crossfireTelemetryPop()
     -- command is 0x80 CRSF_FRAMETYPE_ARDUPILOT
     if (command == 0x80 or command == 0x7F)  and data ~= nil then
@@ -929,7 +930,7 @@ local function crossfirePop()
           app_id = bit32.lshift(data[4+(6*i)],8) + data[3+(6*i)]
           value =  bit32.lshift(data[8+(6*i)],24) + bit32.lshift(data[7+(6*i)],16) + bit32.lshift(data[6+(6*i)],8) + data[5+(6*i)]
           --pushMessage(7,string.format("CRSF:%d - %04X:%08X",i, app_id, value))
-          processTelemetry(app_id, value)
+          processTelemetry(app_id, value, now)
         end
         noTelemetryData = 0
         hideNoTelemetry = true
@@ -1756,7 +1757,7 @@ local function init()
   clearTable(menuLib)
   menuLib = nil
 
-  pushMessage(7,"Yaapu 1.9.4_b1".." ("..'6f7d99a'..")")
+  pushMessage(7,"Yaapu 1.9.5dev".." ("..'155d296'..")")
   collectgarbage()
   collectgarbage()
   playSound("yaapu")
