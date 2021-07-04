@@ -1,7 +1,7 @@
 --
 -- An FRSKY S.Port <passthrough protocol> based Telemetry script for the Horus X10 and X12 radios
 --
--- Copyright (C) 2018-2019. Alessandro Apostoli
+-- Copyright (C) 2018-2021. Alessandro Apostoli
 -- https://github.com/yaapu
 --
 -- This program is free software; you can redistribute it and/or modify
@@ -59,6 +59,8 @@
 --#define DEBUG_MESSAGES
 --#define DEBUG_FENCE
 --#define DEBUG_TERRAIN
+--#define DEBUG_WIND
+--#define DEBUG_AIRSPEED
 
 ---------------------
 -- DEBUG REFRESH RATES
@@ -136,6 +138,7 @@ local unitLongScale = getGeneralSettings().imperial == 0 and 1/1000 or 1/1609.34
 local unitLongLabel = getGeneralSettings().imperial == 0 and "km" or "mi"
 
 
+
 -----------------------
 -- BATTERY 
 -----------------------
@@ -162,6 +165,11 @@ local unitLongLabel = getGeneralSettings().imperial == 0 and "km" or "mi"
 --------------------------
 -- CLIPPING ALGO DEFINES
 --------------------------
+
+-----------------------------
+-- LEFT RIGHT telemetry
+-----------------------------
+
 
 ---------------------------------
 -- LAYOUT
@@ -282,6 +290,11 @@ local function drawHud(myWidget,drawLib,conf,telemetry,status,battery,utils)
   end
 
   
+  if conf.enableWIND == true then
+    lcd.setColor(CUSTOM_COLOR, 0xFE60)
+    drawLib.drawWindArrow(LCD_W/2,86,30,46,46,telemetry.trueWindAngle-telemetry.yaw, 1.5, CUSTOM_COLOR);
+    drawLib.drawWindArrow(LCD_W/2,86,35,46,46,telemetry.trueWindAngle-telemetry.yaw, 1.5, CUSTOM_COLOR);
+  end
   -- parallel lines above and below horizon
   local linesMaxY = 150 --maxY-2
   local linesMinY = 28  --minY+10
@@ -337,11 +350,7 @@ local function drawHud(myWidget,drawLib,conf,telemetry,status,battery,utils)
   -------------------------------------
   -- hud bitmap
   -------------------------------------
-  if status.terrainEnabled == 1 then
-    lcd.drawBitmap(utils.getBitmap("hud_280x134_terrain"),100,18)
-  else
-    lcd.drawBitmap(utils.getBitmap("hud_280x134"),100,18)
-  end
+  lcd.drawBitmap(utils.getBitmap("hud_280x134"),100,18)
   
   -------------------------------------
   -- vario
@@ -371,6 +380,9 @@ local function drawHud(myWidget,drawLib,conf,telemetry,status,battery,utils)
   local alt = homeAlt
   if status.terrainEnabled == 1 then
     alt = telemetry.heightAboveTerrain * unitScale
+    lcd.setColor(CUSTOM_COLOR,lcd.RGB(0, 0, 0))
+    lcd.drawRectangle(314, 100, 56, 12, SOLID+CUSTOM_COLOR)  
+    lcd.drawFilledRectangle(314, 100, 56, 12, SOLID, CUSTOM_COLOR)  
   end
   lcd.setColor(CUSTOM_COLOR,lcd.RGB(00, 0xED, 0x32)) --green
 
@@ -392,13 +404,42 @@ local function drawHud(myWidget,drawLib,conf,telemetry,status,battery,utils)
   end
   --
 
-  -- telemetry.hSpeed is in dm/s
+  -- telemetry.hSpeed and telemetry.airspeed are in dm/s
   local hSpeed = utils.getMaxValue(telemetry.hSpeed,14) * 0.1 * conf.horSpeedMultiplier
-  if (math.abs(hSpeed) >= 10) then
-    lcd.drawNumber(102,65,hSpeed,DBLSIZE+CUSTOM_COLOR)
-  else
-    lcd.drawNumber(102,65,hSpeed*10,DBLSIZE+CUSTOM_COLOR+PREC1)
+  local speed = hSpeed
+  
+  if status.airspeedEnabled == 1 then
+    speed = telemetry.airspeed * 0.1 * conf.horSpeedMultiplier
+    lcd.setColor(CUSTOM_COLOR,lcd.RGB(0, 0, 0))
+    lcd.drawRectangle(100, 100, 66, 12, SOLID+CUSTOM_COLOR)  
+    lcd.drawFilledRectangle(100, 100, 66, 12, SOLID, CUSTOM_COLOR)  
+    lcd.setColor(CUSTOM_COLOR,lcd.RGB(255, 255, 255))
+    lcd.drawText(166,98,"G",CUSTOM_COLOR+SMLSIZE+RIGHT)
   end
+  lcd.setColor(CUSTOM_COLOR,lcd.RGB(00, 0xED, 0x32)) --green
+  if (math.abs(speed) >= 10) then
+    lcd.drawNumber(102,65,speed,DBLSIZE+CUSTOM_COLOR)
+    if status.airspeedEnabled == 1 then
+      lcd.drawNumber(102,94,hSpeed,CUSTOM_COLOR)
+    end
+  else
+    lcd.drawNumber(102,65,speed*10,DBLSIZE+CUSTOM_COLOR+PREC1)
+    if status.airspeedEnabled == 1 then
+      lcd.drawNumber(102,94,hSpeed*10,CUSTOM_COLOR+PREC1)
+    end
+  end
+  
+  -- wind
+  if conf.enableWIND == true then
+    lcd.setColor(CUSTOM_COLOR,lcd.RGB(0, 0, 0))
+    lcd.drawRectangle(100, 114, 66, 14, SOLID+CUSTOM_COLOR)  
+    lcd.drawFilledRectangle(100, 114, 66, 14, SOLID, CUSTOM_COLOR)  
+    lcd.setColor(CUSTOM_COLOR,0xFE60)
+    lcd.drawText(167,113,"W",CUSTOM_COLOR+SMLSIZE+RIGHT)
+    lcd.drawNumber(103,113,telemetry.trueWindSpeed*conf.horSpeedMultiplier,PREC1+CUSTOM_COLOR+SMLSIZE)
+  end
+    
+
   lcd.setColor(CUSTOM_COLOR,0xFFFF)  
   -- min/max arrows
   if status.showMinMaxValues == true then

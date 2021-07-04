@@ -1,7 +1,7 @@
 --
 -- An FRSKY S.Port <passthrough protocol> based Telemetry script for the Horus X10 and X12 radios
 --
--- Copyright (C) 2018-2019. Alessandro Apostoli
+-- Copyright (C) 2018-2021. Alessandro Apostoli
 -- https://github.com/yaapu
 --
 -- This program is free software; you can redistribute it and/or modify
@@ -59,6 +59,8 @@
 --#define DEBUG_MESSAGES
 --#define DEBUG_FENCE
 --#define DEBUG_TERRAIN
+--#define DEBUG_WIND
+--#define DEBUG_AIRSPEED
 
 ---------------------
 -- DEBUG REFRESH RATES
@@ -136,6 +138,7 @@ local unitLongScale = getGeneralSettings().imperial == 0 and 1/1000 or 1/1609.34
 local unitLongLabel = getGeneralSettings().imperial == 0 and "km" or "mi"
 
 
+
 -----------------------
 -- BATTERY 
 -----------------------
@@ -163,6 +166,11 @@ local unitLongLabel = getGeneralSettings().imperial == 0 and "km" or "mi"
 -- CLIPPING ALGO DEFINES
 --------------------------
 
+-----------------------------
+-- LEFT RIGHT telemetry
+-----------------------------
+
+
 --[[
   for info see https://github.com/heldersepu/GMapCatcher
   
@@ -178,9 +186,6 @@ local unitLongLabel = getGeneralSettings().imperial == 0 and "km" or "mi"
 --------------------------
 -- MAP properties
 --------------------------
-
-
-
 
 
 -- model and opentx version
@@ -656,59 +661,6 @@ local function drawMap(myWidget,drawLib,conf,telemetry,status,battery,utils,leve
     lcd.setColor(CUSTOM_COLOR,0xFFFF)
     lcd.drawText((LCD_W-300)/2+5,18+2,string.format("zoom:%d",level),SMLSIZE+CUSTOM_COLOR)
     lcd.setColor(CUSTOM_COLOR,0xFFFF)
-    
-    -- FENCE --
-    -- TERRAIN --
-    -- LEFT ---
-    
-    -- ALT
-    local altPrefix = status.terrainEnabled == 1 and "HAT(" or "Alt("
-    local alt = status.terrainEnabled == 1 and telemetry.heightAboveTerrain or telemetry.homeAlt
-    lcd.setColor(CUSTOM_COLOR,0x0000)
-    lcd.drawText(10, 50+16, altPrefix..unitLabel..")", SMLSIZE+0+CUSTOM_COLOR)
-    lcd.setColor(CUSTOM_COLOR,0xFFFF)
-    lcd.drawNumber(10,50+27,alt*unitScale,MIDSIZE+CUSTOM_COLOR+0)
-    -- SPEED
-    lcd.setColor(CUSTOM_COLOR,0x0000)
-    lcd.drawText(10, 50+54, "Spd("..conf.horSpeedLabel..")", SMLSIZE+0+CUSTOM_COLOR)
-    lcd.setColor(CUSTOM_COLOR,0xFFFF)
-    lcd.drawNumber(10,50+65,telemetry.hSpeed*0.1* conf.horSpeedMultiplier,MIDSIZE+CUSTOM_COLOR+0)
-    -- VSPEED
-    lcd.setColor(CUSTOM_COLOR,0x0000)
-    lcd.drawText(10, 50+92, "VSI("..conf.vertSpeedLabel..")", SMLSIZE+0+CUSTOM_COLOR)
-    lcd.setColor(CUSTOM_COLOR,0xFFFF)
-    lcd.drawNumber(10,50+103, telemetry.vSpeed*0.1*conf.vertSpeedMultiplier, MIDSIZE+CUSTOM_COLOR+0)
-    -- DIST
-    lcd.setColor(CUSTOM_COLOR,0x0000)
-    lcd.drawText(10, 50+130, "Dist("..unitLabel..")", SMLSIZE+0+CUSTOM_COLOR)
-    lcd.setColor(CUSTOM_COLOR,0xFFFF)
-    lcd.drawNumber(10, 50+141, telemetry.homeDist*unitScale, MIDSIZE+0+CUSTOM_COLOR)
-    
-    -- RIGHT
-    -- CELL
-    if battery[1] * 0.01 < 10 then
-      lcd.drawNumber(410, 15+5, battery[1] + 0.5, PREC2+0+MIDSIZE+CUSTOM_COLOR)
-    else
-      lcd.drawNumber(410, 15+5, (battery[1] + 0.5)*0.1, PREC1+0+MIDSIZE+CUSTOM_COLOR)
-    end
-    lcd.drawText(410+50, 15+6, status.battsource, SMLSIZE+CUSTOM_COLOR)
-    lcd.drawText(410+50, 15+16, "V", SMLSIZE+CUSTOM_COLOR)
-    -- aggregate batt %
-    local strperc = string.format("%2d%%",battery[16])
-    lcd.drawText(410+65, 15+30, strperc, MIDSIZE+CUSTOM_COLOR+RIGHT)
-    -- Tracker
-    lcd.setColor(CUSTOM_COLOR,0x0000)
-    lcd.drawText(410, 15+70, "Tracker", SMLSIZE+0+CUSTOM_COLOR)
-    lcd.setColor(CUSTOM_COLOR,0xFFFF)
-    lcd.drawText(410, 15+82, string.format("%d@",(telemetry.homeAngle - 180) < 0 and telemetry.homeAngle + 180 or telemetry.homeAngle - 180), MIDSIZE+0+CUSTOM_COLOR)
-    -- HDG
-    lcd.setColor(CUSTOM_COLOR,0x0000)
-    lcd.drawText(410, 15+110, "Heading", SMLSIZE+0+CUSTOM_COLOR)
-    lcd.setColor(CUSTOM_COLOR,0xFFFF)
-    lcd.drawText(410, 15+122, string.format("%d@",telemetry.yaw), MIDSIZE+0+CUSTOM_COLOR)
-    -- home
-    lcd.setColor(CUSTOM_COLOR,0xFE60)
-    drawLib.drawRArrow(410+28,15+175,22,math.floor(telemetry.homeAngle - telemetry.yaw),CUSTOM_COLOR)
   end
   lcd.setColor(CUSTOM_COLOR,0xFFFF)
 end
@@ -751,9 +703,10 @@ end
 local function draw(myWidget,drawLib,conf,telemetry,status,battery,alarms,frame,utils,customSensors,leftPanel,centerPanel,rightPanel)
   -- initialize maps
   init(conf,utils,status.mapZoomLevel)
+  drawLib.drawLeftRightTelemetry(myWidget,conf,telemetry,status,battery,utils)
   drawMap(myWidget,drawLib,conf,telemetry,status,battery,utils,status.mapZoomLevel)
   lcd.drawBitmap(utils.getBitmap("graph_bg_120x30"),260,180)
-  drawLib.drawGraph("rpm1", 260, 180, 120, 30, 0xFE60, telemetry.homeAlt, false, true, "m")
+  drawLib.drawGraph("map_alt", 260, 180, 120, 30, 0xFE60, telemetry.homeAlt, false, true, "m")
   drawHud(myWidget,drawLib,conf,telemetry,status,battery,utils)
   utils.drawTopBar()
   drawLib.drawStatusBar(2,conf,telemetry,status,battery,alarms,frame,utils)
@@ -763,7 +716,8 @@ local function draw(myWidget,drawLib,conf,telemetry,status,battery,alarms,frame,
   drawLib.drawFenceStatus(utils,status,telemetry,nextX,38)
 end
 
-local function background(myWidget,conf,telemetry,status,utils)
+local function background(myWidget,conf,telemetry,status,utils,drawLib)
+  drawLib.updateGraph("map_alt", telemetry.homeAlt)
 end
 
 return {draw=draw,background=background,changeZoomLevel=changeZoomLevel}

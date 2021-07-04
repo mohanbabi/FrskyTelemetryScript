@@ -1,7 +1,7 @@
 --
 -- An FRSKY S.Port <passthrough protocol> based Telemetry script for the Horus X10 and X12 radios
 --
--- Copyright (C) 2018-2019. Alessandro Apostoli
+-- Copyright (C) 2018-2021. Alessandro Apostoli
 -- https://github.com/yaapu
 --
 -- This program is free software; you can redistribute it and/or modify
@@ -59,6 +59,8 @@
 --#define DEBUG_MESSAGES
 --#define DEBUG_FENCE
 --#define DEBUG_TERRAIN
+--#define DEBUG_WIND
+--#define DEBUG_AIRSPEED
 
 ---------------------
 -- DEBUG REFRESH RATES
@@ -136,6 +138,7 @@ local unitLongScale = getGeneralSettings().imperial == 0 and 1/1000 or 1/1609.34
 local unitLongLabel = getGeneralSettings().imperial == 0 and "km" or "mi"
 
 
+
 -----------------------
 -- BATTERY 
 -----------------------
@@ -162,6 +165,11 @@ local unitLongLabel = getGeneralSettings().imperial == 0 and "km" or "mi"
 --------------------------
 -- CLIPPING ALGO DEFINES
 --------------------------
+
+-----------------------------
+-- LEFT RIGHT telemetry
+-----------------------------
+
 
 
 -------------------------------------
@@ -225,12 +233,14 @@ local menuItems = {
   {"air/groundspeed unit:", "HSPD", 1, { "m/s", "km/h", "mph", "kn" }, { 1, 3.6, 2.23694, 1.94384} },
   {"vertical speed unit:", "VSPD", 1, { "m/s", "ft/s", "ft/min" }, { 1, 3.28084, 196.85} },
   {"widget layout:", "WL", 1, { "default","legacy"}, { 1, 2 } },
-  {"center panel:", "CPANE", 1, { "option 1","option 2","option 3","option 4" }, { 1, 2, 3, 4 } },
-  {"right panel:", "RPANE", 1, {  "option 1","option 2","option 3","option 4","option 5","option 6" }, { 1, 2, 3, 4, 5, 6 } },
-  {"left panel:", "LPANE", 1, {  "option 1","option 2","option 3","option 4" }, { 1 , 2, 3, 4 } },
+  -- allow up to 10 options to be defined by updateMenuItems()
+  {"center panel:", "CPANE", 1, { "","","","","","","","","","" }, { 1, 2, 3, 4, 5, 6, 7, 8 ,9 ,10 } },
+  {"right panel:", "RPANE", 1,  { "","","","","","","","","","" }, { 1, 2, 3, 4, 5, 6, 7, 8 ,9 ,10 } },
+  {"left panel:", "LPANE", 1,   { "","","","","","","","","","" }, { 1, 2, 3, 4, 5, 6, 7, 8 ,9 ,10 } },
   {"enable PX4 flightmodes:", "PX4", 1, { "no", "yes" }, { false, true } },
   {"enable CRSF support:", "CRSF", 1, { "no", "yes" }, { false, true } },
   {"enable RPM support:", "RPM", 1, { "no", "rpm1", "rpm1+rpm2" }, { 1, 2, 3 } },
+  {"enable WIND support:", "WIND", 1, { "no", "yes" }, { false, true } },
   {"emulated page channel:", "STC", 0, 0, 32,nil,0,1 },
   {"emulated wheel channel:", "SWC", 0, 0, 32,nil,0,1 },
   {"emulated wheel delay in seconds:", "SWCD", 1, 0, 50,"sec",PREC1, 1 },
@@ -241,6 +251,42 @@ local menuItems = {
   {"map zoom level min value:", "MAPmZ", -2, -2, 17,nil,0,1 },
   {"map zoom level max value:", "MAPMZ", 17, -2, 17,nil,0,1 },
   {"map grid lines:", "MAPG", 1, { "yes", "no" }, { true, false } },
+  -- allow up to 20 plot sources to be defined by updateMenuItems()
+  {"plot telemetry source 1:", "PLT1", 1, { "","","","","","","","","","","","","","","","","","","","","","","","","","","","","","" }, { 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30 } },
+  {"plot telemetry source 2:", "PLT2", 1, { "","","","","","","","","","","","","","","","","","","","","","","","","","","","","","" }, { 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30 } },
+}
+
+-------------------------------
+-- PLOT SOURCE DEFINITIONS
+-------------------------------
+-- { desc, telemetry, unit, scale, label }
+-- unit: 1=alt,2=dist,3=hspeed,4=vspeed,5=none
+local plotSources = {
+  {"None", "nome", 5, 1, },           -- dm
+  {"Altitude", "homeAlt", 1, 1 },           -- dm
+  {"Airspeed", "airspeed", 3, 0.1 },
+  {"Batt[1] Voltage", "batt1volt", 5, 0.1 },
+  {"Batt[1] Current", "batt1current", 5, 0.1 },
+  {"Batt[2] Voltage", "batt2volt", 5, 0.1 },
+  {"Batt[2] Current", "batt2current", 5, 0.1 },
+  {"Groundspeed","hSpeed", 3, 0.1},  -- dm
+  {"Height Above Terrain", "heightAboveTerrain", 1, 0.1 },
+  {"Home Distance", "homeDist", 2, 1 },    -- m
+  {"HDOP", "gpsHdopC", 5, 0.1},
+  {"Num Sats", "numSats", 5, 1},
+  {"Pitch", "pitch", 5, 1 },
+  {"Rangefinder", "range", 1, 0.01 },
+  {"Roll", "roll", 5, 1 },
+  {"RPM[1]", "rpm1", 5, 1 },
+  {"RPM[2]", "rpm2", 5, 1 },
+  {"RSSI", "rssi", 5, 1 },
+  {"RSSI CRSF", "rssiCRSF", 5, 1 },
+  {"Sonar", "range", 5, 1 },
+  {"Throttle", "throttle", 5, 1 },
+  {"Vertical Speed", "vSpeed", 4, 0.1},   -- dm
+  {"Wind Speed", "trueWindSpeed", 3, 0.1 },
+  {"Wind Direction", "trueWindAngle", 5, 1 },
+  {"Yaw", "yaw", 5, 1}, -- deg
 }
 
 -- map from NEW to OLD settings
@@ -283,6 +329,18 @@ local function getMenuItemByName(items,name)
     -- return item's value, label, index
     return item[3], name, itemIdx
   end
+end
+
+local function plotSourcesToMenuOptions(plotSources)
+  local labels = {}
+  local values = {}
+  
+  for i=1,#plotSources
+  do
+    labels[i] = plotSources[i][1]
+    values[i] = i
+  end
+  return labels, values
 end
 
 local function updateMenuItems()
@@ -428,6 +486,21 @@ local function updateMenuItems()
       menuItems[idx2][3] = math.min(math.max(value2,menuItems[idxzmin][3]),menuItems[idxzmax][3])
     end
     
+    -- plot sources
+    value2, name2, idx2 = getMenuItemByName(menuItems,"PLT1")
+    if value2 ~= nil then
+      local plotLabels, plotValues= plotSourcesToMenuOptions(plotSources)
+      menuItems[idx2][4] = plotLabels
+      menuItems[idx2][5] = plotValues
+    end
+    
+    value2, name2, idx2 = getMenuItemByName(menuItems,"PLT2")
+    if value2 ~= nil then
+      local plotLabels, plotValues= plotSourcesToMenuOptions(plotSources)
+      menuItems[idx2][4] = plotLabels
+      menuItems[idx2][5] = plotValues
+    end
+    
     menu.updated = false
   end
 end
@@ -476,6 +549,7 @@ local function applyConfigValues(conf)
   conf.enablePX4Modes = getMenuItemByName(menuItems,"PX4")
   conf.enableCRSF = getMenuItemByName(menuItems,"CRSF")
   conf.enableRPM = getMenuItemByName(menuItems,"RPM")
+  conf.enableWIND = getMenuItemByName(menuItems,"WIND")
   
   conf.mapZoomLevel = getMenuItemByName(menuItems,"MAPZ")
   conf.mapZoomMin = getMenuItemByName(menuItems,"MAPmZ")
@@ -500,6 +574,10 @@ local function applyConfigValues(conf)
   end
   conf.gpsFormat = getMenuItemByName(menuItems,"GPS")
   conf.enableBattPercByVoltage = getMenuItemByName(menuItems,"BPBV")
+  
+  conf.plotSource1 = getMenuItemByName(menuItems,"PLT1")
+  conf.plotSource2 = getMenuItemByName(menuItems,"PLT2")
+  
   menu.editSelected = false
 end
 
@@ -577,7 +655,7 @@ local function drawConfigMenuBars()
   lcd.drawFilledRectangle(0,LCD_H-20, LCD_W, 20, CUSTOM_COLOR)
   lcd.drawRectangle(0, LCD_H-20, LCD_W, 20, CUSTOM_COLOR)
   lcd.setColor(CUSTOM_COLOR,0xFFFF)  
-  lcd.drawText(2,0,"Yaapu Telemetry Widget 1.9.5-dev".." ("..'82d7ec9'..")",CUSTOM_COLOR)
+  lcd.drawText(2,0,"Yaapu Telemetry Widget 1.9.5-dev".." ("..'bf94571'..")",CUSTOM_COLOR)
   lcd.drawText(2,LCD_H-20+1,getConfigFilename(),CUSTOM_COLOR)
   lcd.drawText(LCD_W,LCD_H-20+1,itemIdx,CUSTOM_COLOR+RIGHT)
 end
@@ -696,4 +774,4 @@ end
 --------------------------------------------------------------------------------
 -- SCRIPT END
 --------------------------------------------------------------------------------
-return {run=run, init=init, loadConfig=loadConfig, compileLayouts=compileLayouts, menuItems=menuItems}
+return {run=run, init=init, loadConfig=loadConfig, compileLayouts=compileLayouts, menuItems=menuItems, plotSources=plotSources}

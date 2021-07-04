@@ -1,7 +1,7 @@
 --
 -- An FRSKY S.Port <passthrough protocol> based Telemetry script for the Horus X10 and X12 radios
 --
--- Copyright (C) 2018-2019. Alessandro Apostoli
+-- Copyright (C) 2018-2021. Alessandro Apostoli
 -- https://github.com/yaapu
 --
 -- This program is free software; you can redistribute it and/or modify
@@ -59,6 +59,8 @@
 --#define DEBUG_MESSAGES
 --#define DEBUG_FENCE
 --#define DEBUG_TERRAIN
+--#define DEBUG_WIND
+--#define DEBUG_AIRSPEED
 
 ---------------------
 -- DEBUG REFRESH RATES
@@ -136,6 +138,7 @@ local unitLongScale = getGeneralSettings().imperial == 0 and 1/1000 or 1/1609.34
 local unitLongLabel = getGeneralSettings().imperial == 0 and "km" or "mi"
 
 
+
 -----------------------
 -- BATTERY 
 -----------------------
@@ -162,6 +165,11 @@ local unitLongLabel = getGeneralSettings().imperial == 0 and "km" or "mi"
 --------------------------
 -- CLIPPING ALGO DEFINES
 --------------------------
+
+-----------------------------
+-- LEFT RIGHT telemetry
+-----------------------------
+
 
 ---------------------------------
 -- LAYOUT

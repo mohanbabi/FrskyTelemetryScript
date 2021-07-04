@@ -1,7 +1,7 @@
 --
 -- An FRSKY S.Port <passthrough protocol> based Telemetry script for the Horus X10 and X12 radios
 --
--- Copyright (C) 2018-2019. Alessandro Apostoli
+-- Copyright (C) 2018-2021. Alessandro Apostoli
 -- https://github.com/yaapu
 --
 -- This program is free software; you can redistribute it and/or modify
@@ -59,6 +59,8 @@
 --#define DEBUG_MESSAGES
 --#define DEBUG_FENCE
 --#define DEBUG_TERRAIN
+--#define DEBUG_WIND
+--#define DEBUG_AIRSPEED
 
 ---------------------
 -- DEBUG REFRESH RATES
@@ -136,6 +138,7 @@ local unitLongScale = getGeneralSettings().imperial == 0 and 1/1000 or 1/1609.34
 local unitLongLabel = getGeneralSettings().imperial == 0 and "km" or "mi"
 
 
+
 -----------------------
 -- BATTERY 
 -----------------------
@@ -162,6 +165,11 @@ local unitLongLabel = getGeneralSettings().imperial == 0 and "km" or "mi"
 --------------------------
 -- CLIPPING ALGO DEFINES
 --------------------------
+
+-----------------------------
+-- LEFT RIGHT telemetry
+-----------------------------
+
 
 
 local soundFileBasePath = "/SOUNDS/yaapu0"
@@ -352,14 +360,20 @@ telemetry.throttle = 0
 telemetry.baroAlt = 0
 -- Total distance
 telemetry.totalDist = 0
--- CRSF
-telemetry.rssiCRSF = 0
 -- RPM
 telemetry.rpm1 = 0
 telemetry.rpm2 = 0
 -- TERRAIN
 telemetry.heightAboveTerrain = 0
 telemetry.terrainUnhealthy = 0
+-- WIND
+telemetry.trueWindSpeed = 0
+telemetry.trueWindAngle = 0
+telemetry.apparentWindSpeed = 0
+telemetry.apparentWindAngle = 0
+-- RSSI
+telemetry.rssi = 0
+telemetry.rssiCRSF = 0
 
 --------------------------------
 -- STATUS DATA
@@ -434,6 +448,12 @@ status.modelString = nil
 -- TERRAIN
 status.terrainEnabled = 0
 status.terrainLastData = getTime()
+-- AIRSPEED
+status.airspeedEnabled = 0
+-- PLOT data
+status.plotSources = nil
+-- UNIT CONVERSION
+status.unitConversion = {}
 
 ---------------------------
 -- BATTERY TABLE
@@ -463,6 +483,7 @@ local leftPanel = nil
 -- MP SCREEN LAYOUT
 -------------------------------
 local mapLayout = nil
+local plotLayout = nil
 -------------------------------
 -- SENSORS
 -------------------------------
@@ -585,8 +606,11 @@ local conf = {
   screenWheelChannelId = 0,
   screenWheelChannelDelay = 20,
   gpsFormat = 1, -- DMS
-  mapProvider = 1, -- 1 GMapCatcher, 2 Google, 3 Yandex
-  enableRPM = 1,
+  mapProvider = 1, -- 1 GMapCatcher, 2 Google
+  enableRPM = 0,
+  enableWIND = 0,
+  plotSource1 = 1,
+  plotSource2 = 1
 }
 
 -------------------------
@@ -616,11 +640,6 @@ local shortHash = nil
 local parseShortHash = false
 local hashByteIndex = 0
 local hash = 2166136261
--------------------------------
--- SCREEN DRAWING
--------------------------------
-local drawMainLayout = nil
-local drawMapLayout = nil
 
 
 local function triggerReset()
@@ -751,7 +770,8 @@ local function resetLayouts()
     elseif resetLayoutPhase == 4 then
       utils.clearTable(mapLayout)
       mapLayout = nil
-      drawMainLayout = layoutLoad
+      utils.clearTable(plotLayout)
+      plotLayout = nil
       resetLayoutPhase = 0
       resetLayoutPending = false
     end
@@ -1044,8 +1064,16 @@ local function processTelemetry(DATA_ID,VALUE,now)
     telemetry.range = bit32.extract(VALUE,22,10) * (10^bit32.extract(VALUE,21,1)) -- cm
   elseif DATA_ID == 0x5005 then -- VELANDYAW
     telemetry.vSpeed = bit32.extract(VALUE,1,7) * (10^bit32.extract(VALUE,0,1)) * (bit32.extract(VALUE,8,1) == 1 and -1 or 1)-- dm/s 
-    telemetry.hSpeed = bit32.extract(VALUE,10,7) * (10^bit32.extract(VALUE,9,1)) -- dm/s
     telemetry.yaw = bit32.extract(VALUE,17,11) * 0.2
+    -- once detected it's sticky
+    if bit32.extract(VALUE,28,1) == 1 then
+      telemetry.airspeed = bit32.extract(VALUE,10,7) * (10^bit32.extract(VALUE,9,1)) -- dm/s
+    else
+      telemetry.hSpeed = bit32.extract(VALUE,10,7) * (10^bit32.extract(VALUE,9,1)) -- dm/s
+    end
+    if status.airspeedEnabled == 0 then
+      status.airspeedEnabled = bit32.extract(VALUE,28,1)
+    end
   elseif DATA_ID == 0x5001 then -- AP STATUS
     telemetry.flightMode = bit32.extract(VALUE,0,5)
     telemetry.simpleMode = bit32.extract(VALUE,5,2)
@@ -1143,6 +1171,11 @@ local function processTelemetry(DATA_ID,VALUE,now)
     telemetry.terrainUnhealthy = bit32.extract(VALUE,13,1)
     status.terrainLastData = now
     status.terrainEnabled = 1
+  elseif DATA_ID == 0x500C then -- WIND
+    telemetry.trueWindSpeed = bit32.extract(VALUE,8,7) * (10^bit32.extract(VALUE,7,1)) -- dm/s
+    telemetry.trueWindAngle = bit32.extract(VALUE, 0, 7) * 3 -- degrees
+    telemetry.apparentWindSpeed = bit32.extract(VALUE,23,7) * (10^bit32.extract(VALUE,22,1)) -- dm/s
+    telemetry.apparentWindAngle = bit32.extract(VALUE, 16, 6) * (bit32.extract(VALUE,15,1) == 1 and -1 or 1) * 3 -- degrees
   --[[
   elseif DATA_ID == 0x50F1 then -- RC CHANNELS
     -- channels 1 - 32
@@ -1156,6 +1189,7 @@ local function processTelemetry(DATA_ID,VALUE,now)
     telemetry.airspeed = bit32.extract(VALUE,1,7) * (10^bit32.extract(VALUE,0,1)) -- dm/s
     telemetry.throttle = bit32.extract(VALUE,8,7) -- unsigned throttle
     telemetry.baroAlt = bit32.extract(VALUE,17,10) * (10^bit32.extract(VALUE,15,2)) * 0.1 * (bit32.extract(VALUE,27,1) == 1 and -1 or 1)
+    status.airspeedEnabled = 1
   end
 end
 
@@ -1467,7 +1501,7 @@ local function drawRssiCRSF()
   lcd.drawText(323 - 128, 0, "RTP:", 0 +CUSTOM_COLOR+SMLSIZE)
   lcd.drawText(323, 0, "RS:", 0 +CUSTOM_COLOR+SMLSIZE)
   lcd.drawText(323 - 128 + 30, 0, string.format("%d/%d/%d",getValue("RQly"),getValue("TQly"),getValue("TPWR")), 0 +CUSTOM_COLOR+SMLSIZE)  
-  lcd.drawText(323 + 22, 0, string.format("%d/%d", status.rssiCRSF, getValue("RFMD")), 0 +CUSTOM_COLOR+SMLSIZE)
+  lcd.drawText(323 + 22, 0, string.format("%d/%d", telemetry.rssiCRSF, getValue("RFMD")), 0 +CUSTOM_COLOR+SMLSIZE)
 end
 
 local function resetTelemetry()
@@ -1528,8 +1562,22 @@ local function resetTelemetry()
   telemetry.airspeed = 0
   telemetry.throttle = 0
   telemetry.baroAlt = 0
-  --
+  -- Total distance
   telemetry.totalDist = 0
+  -- RPM
+  telemetry.rpm1 = 0
+  telemetry.rpm2 = 0
+  -- TERRAIN
+  telemetry.heightAboveTerrain = 0
+  telemetry.terrainUnhealthy = 0
+  -- WIND
+  telemetry.trueWindSpeed = 0
+  telemetry.trueWindAngle = 0
+  telemetry.apparentWindSpeed = 0
+  telemetry.apparentWindAngle = 0
+  -- RSSI
+  telemetry.rssi = 0
+  telemetry.rssiCRSF = 0
 end
 
 local function resetStatus()
@@ -1652,6 +1700,8 @@ local function reset()
       status.strFlightMode = nil
       status.modelString = nil
       frame = {}
+      drawLib.resetGraph("plot1")
+      drawLib.resetGraph("plot2")
       resetPhase = 6
     elseif resetPhase == 6 then
       -- custom sensors
@@ -1726,7 +1776,7 @@ local function setSensorValues()
     setTelemetryValue(0x050F, 0, 0, telemetry.rpm2, 18 , 0 , "RPM2")
   end
   --setTelemetryValue(0x070F, 0, 0, telemetry.roll, 20 , 0 , "ROLL")
-  --setTelemetryValue(0x071F, 0, 0, telemetry.pitch, 20 , 0 , "PTCH")   
+  --setTelemetryValue(0x071F, 0, 0, telemetry.pitch, 20 , 0 , "PTCH")  
 end
 
 utils.drawTopBar = function()
@@ -1986,7 +2036,7 @@ local function checkEvents(celm)
   if telemetry.statusArmed == 1 and status.lastStatusArmed == 0 then
     status.lastStatusArmed = telemetry.statusArmed
     utils.playSound("armed")
-    if telemetry.fencePresent then
+    if telemetry.fencePresent == 1 then
       utils.playSound("fence")
     end
     -- reset home on arming
@@ -2048,6 +2098,7 @@ local bgclock = 0
 local telemetryPop = nil
 
 local function crossfirePop()
+    local now = getTime()
     local command, data = crossfireTelemetryPop()
     if (command == 0x80 or command == 0x7F) and data ~= nil then
       -- actual payload starts at data[2]
@@ -2079,7 +2130,7 @@ local function crossfirePop()
           app_id = bit32.lshift(data[4+(6*i)],8) + data[3+(6*i)]
           value =  bit32.lshift(data[8+(6*i)],24) + bit32.lshift(data[7+(6*i)],16) + bit32.lshift(data[6+(6*i)],8) + data[5+(6*i)]
           --utils.pushMessage(7,string.format("CRSF:%d - %04X:%08X",i, app_id, value), true)
-          processTelemetry(app_id, value)
+          processTelemetry(app_id, value, now)
         end
         status.noTelemetryData = 0
         status.hideNoTelemetry = true
@@ -2092,6 +2143,8 @@ local function loadConfig(init)
   -- load menu library
   local menuLib = utils.doLibrary("../"..menuLibFile)
   menuLib.loadConfig(conf)
+  -- get a reference to the plotSources table
+  status.plotSources = menuLib.plotSources
   -- ok configuration loaded
   status.battsource = conf.defaultBattSource
   -- CRSF or SPORT?
@@ -2107,6 +2160,7 @@ local function loadConfig(init)
     resetLayoutPhase = -1
   end
   status.mapZoomLevel=conf.mapProvider == 1 and conf.mapZoomMin or conf.mapZoomMax 
+  
   loadConfigPending = false
 end
 
@@ -2186,8 +2240,9 @@ local function backgroundTasks(myWidget,telemetryLoops)
     if conf.enableCRSF then
       -- take the best signal and apply same algo used by ardupilot to estimate a 0-100 rssi value
       -- rssi = roundf((1.0f - (rssi_dbm - 50.0f) / 70.0f) * 255.0f);
-      status.rssiCRSF = math.min(100, math.floor(0.5 + ((1-(math.min(getValue("1RSS"), getValue("2RSS")) - 50)/70)*100)))
+      telemetry.rssiCRSF = math.min(100, math.floor(0.5 + ((1-(math.min(getValue("1RSS"), getValue("2RSS")) - 50)/70)*100)))
     end
+    telemetry.rssi = getRSSI()
   end
   
   -- SLOWER: this runs around 1.25Hz but not when the previous block runs
@@ -2249,17 +2304,7 @@ local function backgroundTasks(myWidget,telemetryLoops)
       loadConfig()
       model.setGlobalVariable(8,8,0)
     end
-    -- call custom panel background functions
-    if leftPanel ~= nil then
-      leftPanel.background(myWidget,conf,telemetry,status,utils)
-    end
-    if centerPanel ~= nil then
-      centerPanel.background(myWidget,conf,telemetry,status,utils)
-    end
-    if rightPanel ~= nil then
-      rightPanel.background(myWidget,conf,telemetry,status,utils)
-    end
-  
+    
     if telemetry.lat ~= nil then
       if conf.gpsFormat == 1 then
         -- DMS
@@ -2269,6 +2314,13 @@ local function backgroundTasks(myWidget,telemetryLoops)
         -- decimal
         telemetry.strLat = string.format("%.06f", telemetry.lat)
         telemetry.strLon = string.format("%.06f", telemetry.lon)
+      end
+    end
+    
+    -- map background function
+    if status.screenTogglePage ~= 5 then
+      if mapLayout ~= nil then
+        mapLayout.background(myWidget,conf,telemetry,status,utils,drawLib)
       end
     end
   end
@@ -2301,13 +2353,19 @@ local function init()
   -- load battery config
   utils.loadBatteryConfigFile()
   -- ok done
-  utils.pushMessage(7,"Yaapu Telemetry Widget 1.9.5-dev".." ("..'82d7ec9'..")")
+  utils.pushMessage(7,"Yaapu Telemetry Widget 1.9.5-dev".." ("..'bf94571'..")")
   utils.playSound("yaapu")
   -- fix for generalsettings lazy loading...
   unitScale = getGeneralSettings().imperial == 0 and 1 or 3.28084
   unitLabel = getGeneralSettings().imperial == 0 and "m" or "ft"
   unitLongScale = getGeneralSettings().imperial == 0 and 1/1000 or 1/1609.34
   unitLongLabel = getGeneralSettings().imperial == 0 and "km" or "mi"
+  -- unit conversion helper
+  status.unitConversion[1] = unitScale
+  status.unitConversion[2] = unitScale
+  status.unitConversion[3] = conf.horSpeedMultiplier
+  status.unitConversion[4] = conf.vertSpeedMultiplier
+  status.unitConversion[5] = 1
 end
 
 --------------------------------------------------------------------------------
@@ -2317,8 +2375,9 @@ end
 -- page 3 min max
 -- page 4 dual battery view
 -- page 5 map view
+-- page 6 plot view
 local options = {
-  { "page", VALUE, 1, 1, 5},
+  { "page", VALUE, 1, 1, 6},
 }
 -- shared init flag
 local initDone = 0
@@ -2451,6 +2510,16 @@ local function background(myWidget)
   if myWidget.options.page == 1 then
     -- run bg tasks
     backgroundTasks(myWidget,15)
+    -- call custom panel background functions
+    if leftPanel ~= nil then
+      leftPanel.background(myWidget,conf,telemetry,status,utils,drawLib)
+    end
+    if centerPanel ~= nil then
+      centerPanel.background(myWidget,conf,telemetry,status,utils,drawLib)
+    end
+    if rightPanel ~= nil then
+      rightPanel.background(myWidget,conf,telemetry,status,utils,drawLib)
+    end
     return
   end
   -- when page 3 goes to background hide minmax values
@@ -2461,6 +2530,20 @@ local function background(myWidget)
   -- when page 4 goes to background hide dual battery view
   if myWidget.options.page == 4 then
     status.showDualBattery = false
+    return
+  end
+  -- when page 5 goes to background
+  if myWidget.options.page == 5 then
+    if mapLayout ~= nil then
+      mapLayout.background(myWidget,conf,telemetry,status,utils,drawLib)
+    end
+    return
+  end
+  -- when page 6 goes to background
+  if myWidget.options.page == 6 then
+    if plotLayout ~= nil then
+      plotLayout.background(myWidget,conf,telemetry,status,utils,drawLib)
+    end
     return
   end
 end
@@ -2508,6 +2591,13 @@ local function loadMapLayout()
   end
 end
 
+local function loadPlotLayout()
+  -- Layout start
+  if loadCycle == 3 then
+    plotLayout = utils.doLibrary("layout_plot")
+  end
+end
+
 local function drawInitialingMsg()
   lcd.clear(CUSTOM_COLOR)
   lcd.setColor(CUSTOM_COLOR,0xFFFF)
@@ -2551,6 +2641,17 @@ local function drawFullScreen(myWidget)
         mapLayout.draw(myWidget,drawLib,conf,telemetry,status,battery,alarms,frame,utils,customSensors,leftPanel,centerPanel,rightPanel)
       else
         loadMapLayout()
+      end
+    elseif myWidget.options.page == 6 or status.screenTogglePage == 6 then
+      ------------------------------------
+      -- Widget Page 6: Plotting screen
+      ------------------------------------
+      lcd.clear(CUSTOM_COLOR)
+      
+      if plotLayout ~= nil then
+        plotLayout.draw(myWidget,drawLib,conf,telemetry,status,battery,alarms,frame,utils,customSensors,leftPanel,centerPanel,rightPanel)
+      else
+        loadPlotLayout()
       end
     else
       ------------------------------------

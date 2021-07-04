@@ -171,82 +171,66 @@ local unitLongLabel = getGeneralSettings().imperial == 0 and "km" or "mi"
 -----------------------------
 
 
----------------------------------
--- LAYOUT
----------------------------------
+--[[
+  for info see https://github.com/heldersepu/GMapCatcher
+  
+  Notes:
+  - tiles need to be resized down to 100x100 from original size of 256x256
+  - at max zoom level (-2) 1 tile = 100px = 76.5m
+]]
 
-
-
-
-
-
-
-
-
-
-
-
-
------------------------
--- COMPASS RIBBON
------------------------
-
-
+--------------------------
+-- MINI HUD
+--------------------------
 
 -- model and opentx version
 local ver, radio, maj, minor, rev = getVersion()
 
-local function drawHud(myWidget,drawLib,conf,telemetry,status,battery,utils)
+local lastProcessCycle = getTime()
+local processCycle = 0
 
+
+local function drawHud(myWidget,drawLib,conf,telemetry,status,battery,utils)--getMaxValue,getBitmap,drawBlinkBitmap)
   local r = -telemetry.roll
-  local cx,cy,dx,dy--,ccx,ccy,cccx,cccy
+  local cx,cy,dx,dy
   local yPos = 0 + 20 + 8
+  local scale = 0.6
   -----------------------
   -- artificial horizon
   -----------------------
-  -- no roll ==> segments are vertical, offsets are multiples of 12
+  -- no roll ==> segments are vertical, offsets are multiples of 6.5
   if ( telemetry.roll == 0) then
     dx=0
-    dy=telemetry.pitch
+    dy=telemetry.pitch * scale
     cx=0
-    cy=12
-    --ccx=0
-    --ccy=2*12
-    --cccx=0
-    --cccy=3*12
+    cy=6.5
   else
     -- center line offsets
-    dx = math.cos(math.rad(90 - r)) * -telemetry.pitch
-    dy = math.sin(math.rad(90 - r)) * telemetry.pitch
+    dx = math.cos(math.rad(90 - r)) * -telemetry.pitch * scale
+    dy = math.sin(math.rad(90 - r)) * telemetry.pitch * scale
     -- 1st line offsets
-    cx = math.cos(math.rad(90 - r)) * 12
-    cy = math.sin(math.rad(90 - r)) * 12
-    -- 2nd line offsets
-    --ccx = math.cos(math.rad(90 - r)) * 2 * 12
-    --ccy = math.sin(math.rad(90 - r)) * 2 * 12
-    -- 3rd line offsets
-    --cccx = math.cos(math.rad(90 - r)) * 3 * 12
-    --cccy = math.sin(math.rad(90 - r)) * 3 * 12
+    cx = math.cos(math.rad(90 - r)) * 6.5
+    cy = math.sin(math.rad(90 - r)) * 6.5
   end
-  local rollX = math.floor((LCD_W-160)/2 + 160/2)
   -----------------------
   -- dark color for "ground"
   -----------------------
-  -- 140x90
-  local minY = 24
-  local maxY = 24 + 90
-  
-  local minX = (LCD_W-160)/2
-  local maxX = (LCD_W-160)/2 + 160
-  
-  local ox = (LCD_W-160)/2 + 160/2 + dx
-  local oy = 69 + dy
+  -- 90x70
+  local minY = 22
+  local maxY = 22+42
+  --
+  local minX = 7
+  local maxX = 7 + 76
+  --
+  local ox = 7 + 76/2 + dx
+  --
+  local oy = 43 + dy
   local yy = 0
   
-  --lcd.setColor(CUSTOM_COLOR,lcd.RGB(0x0d, 0x68, 0xb1)) -- bighud blue
+ --lcd.setColor(CUSTOM_COLOR,lcd.RGB(0x0d, 0x68, 0xb1)) -- bighud blue
   lcd.setColor(CUSTOM_COLOR,lcd.RGB(0x7b, 0x9d, 0xff)) -- default blue
   lcd.drawFilledRectangle(minX,minY,maxX-minX,maxY - minY,CUSTOM_COLOR)
-  -- HUD
+ -- HUD
   --lcd.setColor(CUSTOM_COLOR,lcd.RGB(77, 153, 0))
   --lcd.setColor(CUSTOM_COLOR,lcd.RGB(0x90, 0x63, 0x20)) --906320 bighud brown
   lcd.setColor(CUSTOM_COLOR,lcd.RGB(0x63, 0x30, 0x00)) --623000 old brown
@@ -304,106 +288,102 @@ local function drawHud(myWidget,drawLib,conf,telemetry,status,battery,utils)
     end
   end
 
-
   -- parallel lines above and below horizon
   local linesMaxY = maxY-1
   local linesMinY = minY+1
+  local rollX = math.floor(7 + 76/2)
   lcd.setColor(CUSTOM_COLOR,0xFFFF)
   -- +/- 90 deg
-  for dist=1,8
+  for dist=1,6
   do
-    drawLib.drawLineWithClipping(rollX + dx - dist*cx,dy + 69 + dist*cy,r,(dist%2==0 and 40 or 20),DOTTED,(LCD_W-160)/2+2,(LCD_W-160)/2+160-2,linesMinY,linesMaxY,CUSTOM_COLOR,radio,rev)
-    drawLib.drawLineWithClipping(rollX + dx + dist*cx,dy + 69 - dist*cy,r,(dist%2==0 and 40 or 20),DOTTED,(LCD_W-160)/2+2,(LCD_W-160)/2+160-2,linesMinY,linesMaxY,CUSTOM_COLOR,radio,rev)
+    drawLib.drawLineWithClipping(rollX + dx - dist*cx,dy + 43 + dist*cy,r,(dist%2==0 and 40 or 20),DOTTED,7+2,7+76-2,linesMinY,linesMaxY,CUSTOM_COLOR,radio,rev)
+    drawLib.drawLineWithClipping(rollX + dx + dist*cx,dy + 43 - dist*cy,r,(dist%2==0 and 40 or 20),DOTTED,7+2,7+76-2,linesMinY,linesMaxY,CUSTOM_COLOR,radio,rev)
   end
--- hashmarks
-  local startY = minY + 1
-  local endY = maxY - 10
-  local step = 18
-  lcd.setColor(CUSTOM_COLOR,lcd.RGB(120,120,120))
-  -- hSpeed 
-  local roundHSpeed = math.floor((telemetry.hSpeed*conf.horSpeedMultiplier*0.1/5)+0.5)*5;
-  local offset = math.floor((telemetry.hSpeed*conf.horSpeedMultiplier*0.1-roundHSpeed)*0.2*step);
-  local ii = 0;  
-  local yy = 0  
-  for j=roundHSpeed+10,roundHSpeed-10,-5
-  do
-      yy = startY + (ii*step) + offset
-      if yy >= startY and yy < endY then
-        lcd.drawLine((LCD_W-160)/2 + 1, yy+9, (LCD_W-160)/2 + 5, yy+9, SOLID, CUSTOM_COLOR)
-        lcd.drawNumber((LCD_W-160)/2 + 8,  yy, j, SMLSIZE+CUSTOM_COLOR)
-      end
-      ii=ii+1;
-  end
-  -- altitude 
-  local roundAlt = math.floor((telemetry.homeAlt*unitScale/5)+0.5)*5;
-  offset = math.floor((telemetry.homeAlt*unitScale-roundAlt)*0.2*step);
-  ii = 0;  
-  yy = 0
-  for j=roundAlt+10,roundAlt-10,-5
-  do
-      yy = startY + (ii*step) + offset
-      if yy >= startY and yy < endY then
-        lcd.drawLine((LCD_W-160)/2 + 160 - 15, yy+8, (LCD_W-160)/2 + 160 -10, yy+8, SOLID, CUSTOM_COLOR)
-        lcd.drawNumber((LCD_W-160)/2 + 160 - 16,  yy, j, SMLSIZE+RIGHT+CUSTOM_COLOR)
-      end
-      ii=ii+1;
-  end
-  lcd.setColor(CUSTOM_COLOR,0xFFFF)
   -------------------------------------
   -- hud bitmap
   -------------------------------------
-  lcd.drawBitmap(utils.getBitmap("hud_160x90c"),(LCD_W-160)/2,24) --160x90
-  -------------------------------------
-  -- vario bitmap
-  -------------------------------------
-  local varioMax = 5
-  local varioSpeed = math.min(math.abs(0.1*telemetry.vSpeed),5)
-  local varioH = varioSpeed/varioMax*35
-  if telemetry.vSpeed > 0 then
-    varioY = 24 + 35 - varioH
-  else
-    varioY = 24 + 55
+  lcd.drawBitmap(utils.getBitmap("hud_48x48a"),7-2+13,22-3-4)
+end
+
+local val1Max = -math.huge
+local val1Min = math.huge
+local val2Max = -math.huge
+local val2Min = math.huge
+local initialized = false
+
+local function init(myWidget,drawLib,conf,telemetry,status,battery,alarms,frame,utils,customSensors,leftPanel,centerPanel,rightPanel)
+  if not initialized then
+    val1Max = -math.huge
+    val1Min = math.huge
+    val2Max = -math.huge
+    val2Min = math.huge
+    drawLib.resetGraph("plot1")
+    drawLib.resetGraph("plot2")
+    initialized = true
   end
-  --00ae10
-  lcd.setColor(CUSTOM_COLOR,lcd.RGB(255, 0xce, 0)) --yellow
-  -- lcd.setColor(CUSTOM_COLOR,lcd.RGB(00, 0xED, 0x32)) --green
-  -- lcd.setColor(CUSTOM_COLOR,lcd.RGB(50, 50, 50)) --dark grey
-  lcd.drawFilledRectangle(310, varioY, 10, varioH, CUSTOM_COLOR, 0)  
+end
+
+local function draw(myWidget,drawLib,conf,telemetry,status,battery,alarms,frame,utils,customSensors,leftPanel,centerPanel,rightPanel)
+  init(myWidget,drawLib,conf,telemetry,status,battery,alarms,frame,utils,customSensors,leftPanel,centerPanel,rightPanel)
   
-  -------------------------------------
-  -- left and right indicators on HUD
-  -------------------------------------
-  -- DATA
-  lcd.setColor(CUSTOM_COLOR,0xFFFF)  
-  -- altitude
-  local alt = utils.getMaxValue(telemetry.homeAlt,11) * unitScale
-  if math.abs(alt) > 999 then
-    lcd.setColor(CUSTOM_COLOR,lcd.RGB(00, 0xED, 0x32)) --green
-    lcd.drawNumber((LCD_W-160)/2+160+1,69-10,alt,CUSTOM_COLOR+RIGHT)
-  elseif math.abs(alt) >= 10 then
-    lcd.setColor(CUSTOM_COLOR,lcd.RGB(00, 0xED, 0x32)) --green
-    lcd.drawNumber((LCD_W-160)/2+160+1,69-14,alt,MIDSIZE+CUSTOM_COLOR+RIGHT)
-  else
-    lcd.setColor(CUSTOM_COLOR,lcd.RGB(00, 0xED, 0x32)) --green
-    lcd.drawNumber((LCD_W-160)/2+160+1,69-14,alt*10,MIDSIZE+PREC1+CUSTOM_COLOR+RIGHT)
+  drawLib.drawLeftRightTelemetry(myWidget,conf,telemetry,status,battery,utils)
+  -- plot area
+  lcd.setColor(CUSTOM_COLOR, lcd.RGB(100,100,100))
+  lcd.drawFilledRectangle(90,54,300,170,SOLID+CUSTOM_COLOR)
+  local y1,y2,val1,val2
+  -- val1
+  if conf.plotSource1 > 1 then
+    val1 = telemetry[status.plotSources[conf.plotSource1][2]] * status.plotSources[conf.plotSource1][4] * status.unitConversion[status.plotSources[conf.plotSource1][3]]
+    val1Min = math.min(val1,val1Min)
+    val1Max = math.max(val1,val1Max)
+    lcd.setColor(CUSTOM_COLOR, 0xFE60)
+    lcd.drawText(91,38,status.plotSources[conf.plotSource1][1],CUSTOM_COLOR+SMLSIZE)
+    lcd.drawText(91,52,string.format("%d", val1Max),CUSTOM_COLOR+SMLSIZE)
+    lcd.drawText(91,200,string.format("%d", val1Min),CUSTOM_COLOR+SMLSIZE)
+    y1 = drawLib.drawGraph("plot1", 90, 59, 300, 151, 0xFE60, val1, false, false, nil, 50)
   end
-  -- telemetry.hSpeed is in dm/s
-  local hSpeed = utils.getMaxValue(telemetry.hSpeed,14) * 0.1 * conf.horSpeedMultiplier
-  if (math.abs(hSpeed) >= 10) then
-    lcd.drawNumber((LCD_W-160)/2+2,69-14,hSpeed,MIDSIZE+CUSTOM_COLOR)
-  else
-    lcd.drawNumber((LCD_W-160)/2+2,69-14,hSpeed*10,MIDSIZE+CUSTOM_COLOR+PREC1)
+  -- val2
+  if conf.plotSource2 > 1 then
+    val2 = telemetry[status.plotSources[conf.plotSource2][2]] * status.plotSources[conf.plotSource2][4] * status.unitConversion[status.plotSources[conf.plotSource2][3]]
+    val2Min = math.min(val2,val2Min)
+    val2Max = math.max(val2,val2Max)
+    lcd.setColor(CUSTOM_COLOR, 0xFFFF)
+    lcd.drawText(389,38,status.plotSources[conf.plotSource2][1],CUSTOM_COLOR+SMLSIZE+RIGHT)
+    lcd.drawText(389,52,string.format("%d", val2Max),CUSTOM_COLOR+SMLSIZE+RIGHT)
+    lcd.drawText(389,200,string.format("%d", val2Min),CUSTOM_COLOR+SMLSIZE+RIGHT)
+    y2 = drawLib.drawGraph("plot2", 90, 59, 300, 151, 0xFFFF, val2, false, false, nil, 50)
   end
-  -- min/max arrows
-  if status.showMinMaxValues == true then
-    drawLib.drawVArrow((LCD_W-160)/2+50, 69-9,true,false,utils)
-    drawLib.drawVArrow((LCD_W-160)/2+160-57, 69-9,true,false,utils)
+  -- draw floating values on top
+  if conf.plotSource1 > 1 then
+    if y1 ~= nil then
+      lcd.drawText(92,y1-7,string.format("%d", val1),SMLSIZE+INVERS)
+    end
   end
-  -- compass ribbon
-  drawLib.drawCompassRibbon(120,myWidget,conf,telemetry,status,battery,utils,140,(LCD_W-140)/2,(LCD_W+140)/2,15,false)
+  if conf.plotSource2 > 1 then
+    if y2 ~= nil then
+      lcd.drawText(388,y2-7,string.format("%d", val2),SMLSIZE+RIGHT+INVERS)
+    end
+  end
+  drawHud(myWidget,drawLib,conf,telemetry,status,battery,utils)
+  
+  utils.drawTopBar()
+  drawLib.drawStatusBar(2,conf,telemetry,status,battery,alarms,frame,utils)
+  drawLib.drawArmStatus(status,telemetry,utils)
+  drawLib.drawFailsafe(telemetry,utils)
+  local nextX = drawLib.drawTerrainStatus(utils,status,telemetry,90,20)
+  drawLib.drawFenceStatus(utils,status,telemetry,nextX,20)
 end
 
-local function background(myWidget,conf,telemetry,status,utils)
+local function background(myWidget,conf,telemetry,status,utils,drawLib)
+  if status.unitConversion ~= nil then
+    if conf.plotSource1 > 1 then    
+      drawLib.updateGraph("plot1", telemetry[status.plotSources[conf.plotSource1][2]] * status.plotSources[conf.plotSource1][4] * status.unitConversion[status.plotSources[conf.plotSource1][3]], 50)
+    end
+    if conf.plotSource2 > 1 then    
+      drawLib.updateGraph("plot2", telemetry[status.plotSources[conf.plotSource2][2]] * status.plotSources[conf.plotSource2][4] * status.unitConversion[status.plotSources[conf.plotSource2][3]], 50)
+    end
+  end
 end
 
-return {drawHud=drawHud,background=background}
+return {draw=draw, background=background}
+

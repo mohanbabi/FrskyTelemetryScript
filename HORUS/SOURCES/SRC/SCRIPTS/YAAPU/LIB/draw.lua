@@ -1,7 +1,7 @@
 --
 -- An FRSKY S.Port <passthrough protocol> based Telemetry script for the Horus X10 and X12 radios
 --
--- Copyright (C) 2018-2019. Alessandro Apostoli
+-- Copyright (C) 2018-2021. Alessandro Apostoli
 -- https://github.com/yaapu
 --
 -- This program is free software; you can redistribute it and/or modify
@@ -59,6 +59,8 @@
 --#define DEBUG_MESSAGES
 --#define DEBUG_FENCE
 --#define DEBUG_TERRAIN
+--#define DEBUG_WIND
+--#define DEBUG_AIRSPEED
 
 ---------------------
 -- DEBUG REFRESH RATES
@@ -136,6 +138,7 @@ local unitLongScale = getGeneralSettings().imperial == 0 and 1/1000 or 1/1609.34
 local unitLongLabel = getGeneralSettings().imperial == 0 and "km" or "mi"
 
 
+
 -----------------------
 -- BATTERY 
 -----------------------
@@ -162,6 +165,11 @@ local unitLongLabel = getGeneralSettings().imperial == 0 and "km" or "mi"
 --------------------------
 -- CLIPPING ALGO DEFINES
 --------------------------
+
+-----------------------------
+-- LEFT RIGHT telemetry
+-----------------------------
+
 
 
 -- model and opentx version
@@ -362,8 +370,7 @@ local barMaxValues = {}
 local barAvgValues = {}
 local barSampleCounts = {}
 
--- draw an horizontal dynamic bar with an average red pointer of the last 5 samples
-local function drawBar(name, x, y, w, h, color, value, flags)
+local function updateBar(name, value)
   -- init
   initMap(barSampleCounts,name)
   initMap(barMaxValues,name)
@@ -374,6 +381,10 @@ local function drawBar(name, x, y, w, h, color, value, flags)
   barMaxValues[name] = math.max(value,barMaxValues[name])
   -- weighted average on 5 samples
   barAvgValues[name] = barAvgValues[name]*0.9 + value*0.1
+end
+-- draw an horizontal dynamic bar with an average red pointer of the last 5 samples
+local function drawBar(name, x, y, w, h, color, value, flags)
+  updateBar(name, value)
   
   lcd.setColor(CUSTOM_COLOR, 0xFFFF)
   lcd.drawFilledRectangle(x,y,w,h,CUSTOM_COLOR)
@@ -407,7 +418,19 @@ local graphAvgValues = {}
 local graphSampleCounts = {}
 local graphSamples = {}
 
-local function drawGraph(name, x ,y ,w , h, color, value, draw_bg, draw_value, unit)
+local function resetGraph(name)
+  graphSampleTime[name] = 0
+  graphMaxValues[name] = 0
+  graphMinValues[name] = 0
+  graphAvgValues[name] = 0
+  graphSampleCounts[name] = 0
+  graphSamples[name] = {}
+end
+
+local function updateGraph(name, value, maxSamples)
+  if maxSamples == nil then
+    maxSamples = 20
+  end
   -- init
   initMap(graphSampleTime,name)
   initMap(graphMaxValues,name)
@@ -422,13 +445,21 @@ local function drawGraph(name, x ,y ,w , h, color, value, draw_bg, draw_value, u
   if getTime() - graphSampleTime[name] > 100 then
     graphAvgValues[name] = graphAvgValues[name]*0.9 + value*0.1
     graphSampleCounts[name] = graphSampleCounts[name]+1
-    graphSamples[name][graphSampleCounts[name]%20] = value -- 0->49
+    graphSamples[name][graphSampleCounts[name]%maxSamples] = value -- 0->49
     graphSampleTime[name] = getTime()
     graphMinValues[name] = math.min(value, graphMinValues[name])
     graphMaxValues[name] = math.max(value, graphMaxValues[name])
   end
   if graphSampleCounts[name] < 2 then
     return
+  end
+end
+
+local function drawGraph(name, x ,y ,w , h, color, value, draw_bg, draw_value, unit, maxSamples)
+  updateGraph(name, value, maxSamples)
+  
+  if maxSamples == nil then
+    maxSamples = 20
   end
   
   if draw_bg == true then
@@ -439,7 +470,7 @@ local function drawGraph(name, x ,y ,w , h, color, value, draw_bg, draw_value, u
   lcd.setColor(CUSTOM_COLOR, color) -- graph color
   
   local height = h - 5 -- available height for the graph
-  local step = (w-2)/(20-1)
+  local step = (w-2)/(maxSamples-1)
   local maxY = y + h - 3
   
   local minMaxWindow = graphMaxValues[name] - graphMinValues[name] -- max difference between current window min/max
@@ -448,30 +479,39 @@ local function drawGraph(name, x ,y ,w , h, color, value, draw_bg, draw_value, u
   local scale = height/minMaxWindow
   
   -- number of samples we can plot
-  local sampleWindow = math.min(20-1,graphSampleCounts[name]-1)
+  local sampleWindow = math.min(maxSamples-1,graphSampleCounts[name]-1)
   
+  local lastY = nil
   for i=1,sampleWindow
   do
-    local prevSample = graphSamples[name][(i-1+graphSampleCounts[name]-sampleWindow)%20]
-    local curSample =  graphSamples[name][(i+graphSampleCounts[name]-sampleWindow)%20]
+    local prevSample = graphSamples[name][(i-1+graphSampleCounts[name]-sampleWindow)%maxSamples]
+    local curSample =  graphSamples[name][(i+graphSampleCounts[name]-sampleWindow)%maxSamples]
     
     local x1 = x + (i-1)*step
     local x2 = x + i*step
     
     local y1 = maxY - (prevSample-graphMinValues[name])*scale
     local y2 = maxY - (curSample-graphMinValues[name])*scale    
-    
+    lastY = y2
     lcd.drawLine(x1,y1,x2,y2,SOLID,CUSTOM_COLOR)
+  end
+
+  if lastY ~= nil then
+    lcd.setColor(CUSTOM_COLOR, lcd.RGB(150,150,150))
+    lcd.drawLine(x, lastY, x+w, lastY ,DOTTED, CUSTOM_COLOR)
   end
   
   if draw_bg == true then
     lcd.setColor(CUSTOM_COLOR, 0x0000)
     lcd.drawRectangle(x,y,w,h,CUSTOM_COLOR)
   end
-  if draw_value == true then
+  
+  if draw_value == true and lastY ~= nil then
     lcd.setColor(CUSTOM_COLOR, 0xFFFF)
-    lcd.drawText(x+2,y+h-18,string.format("%d%s",value,unit),CUSTOM_COLOR)
+    lcd.drawText(x+2,lastY-6,string.format("%d%s",value,unit),CUSTOM_COLOR+SMLSIZE+INVERS)
   end
+
+  return lastY
 end
 
 --[[
@@ -734,6 +774,74 @@ local function drawCustomSensors(x,customSensors,customSensorXY,utils,status,col
     end
 end
 
+local function drawWindArrow(x,y,r1,r2,arrow_angle, angle, skew, color)
+  local a = math.rad(angle - 90)
+  local ap = math.rad(angle + arrow_angle/2 - 90)
+  local am = math.rad(angle - arrow_angle/2 - 90)
+  
+  local x1 = x + r1 * math.cos(a) * skew
+  local y1 = y + r1 * math.sin(a)
+  local x2 = x + r2 * math.cos(ap) * skew
+  local y2 = y + r2 * math.sin(ap)
+  local x3 = x + r2 * math.cos(am) * skew
+  local y3 = y + r2 * math.sin(am)
+  
+  lcd.drawLine(x1,y1,x2,y2,SOLID,color)
+  lcd.drawLine(x1,y1,x3,y3,SOLID,color)
+  lcd.drawRectangle(x-2,y-2,4,4,SOLID+color)
+end
+
+local function drawLeftRightTelemetry(myWidget,conf,telemetry,status,battery)
+    -- ALT
+    local altPrefix = status.terrainEnabled == 1 and "HAT(" or "Alt("
+    local alt = status.terrainEnabled == 1 and telemetry.heightAboveTerrain or telemetry.homeAlt
+    lcd.setColor(CUSTOM_COLOR,0x0000)
+    lcd.drawText(10, 50+16, altPrefix..unitLabel..")", SMLSIZE+0+CUSTOM_COLOR)
+    lcd.setColor(CUSTOM_COLOR,0xFFFF)
+    lcd.drawNumber(10,50+27,alt*unitScale,MIDSIZE+CUSTOM_COLOR+0)
+    -- SPEED
+    lcd.setColor(CUSTOM_COLOR,0x0000)
+    lcd.drawText(10, 50+54, "Spd("..conf.horSpeedLabel..")", SMLSIZE+0+CUSTOM_COLOR)
+    lcd.setColor(CUSTOM_COLOR,0xFFFF)
+    lcd.drawNumber(10,50+65,telemetry.hSpeed*0.1* conf.horSpeedMultiplier,MIDSIZE+CUSTOM_COLOR+0)
+    -- VSPEED
+    lcd.setColor(CUSTOM_COLOR,0x0000)
+    lcd.drawText(10, 50+92, "VSI("..conf.vertSpeedLabel..")", SMLSIZE+0+CUSTOM_COLOR)
+    lcd.setColor(CUSTOM_COLOR,0xFFFF)
+    lcd.drawNumber(10,50+103, telemetry.vSpeed*0.1*conf.vertSpeedMultiplier, MIDSIZE+CUSTOM_COLOR+0)
+    -- DIST
+    lcd.setColor(CUSTOM_COLOR,0x0000)
+    lcd.drawText(10, 50+130, "Dist("..unitLabel..")", SMLSIZE+0+CUSTOM_COLOR)
+    lcd.setColor(CUSTOM_COLOR,0xFFFF)
+    lcd.drawNumber(10, 50+141, telemetry.homeDist*unitScale, MIDSIZE+0+CUSTOM_COLOR)
+    
+    -- RIGHT
+    -- CELL
+    if battery[1] * 0.01 < 10 then
+      lcd.drawNumber(410, 15+5, battery[1] + 0.5, PREC2+0+MIDSIZE+CUSTOM_COLOR)
+    else
+      lcd.drawNumber(410, 15+5, (battery[1] + 0.5)*0.1, PREC1+0+MIDSIZE+CUSTOM_COLOR)
+    end
+    lcd.drawText(410+50, 15+6, status.battsource, SMLSIZE+CUSTOM_COLOR)
+    lcd.drawText(410+50, 15+16, "V", SMLSIZE+CUSTOM_COLOR)
+    -- aggregate batt %
+    local strperc = string.format("%2d%%",battery[16])
+    lcd.drawText(410+65, 15+30, strperc, MIDSIZE+CUSTOM_COLOR+RIGHT)
+    -- Tracker
+    lcd.setColor(CUSTOM_COLOR,0x0000)
+    lcd.drawText(410, 15+70, "Tracker", SMLSIZE+0+CUSTOM_COLOR)
+    lcd.setColor(CUSTOM_COLOR,0xFFFF)
+    lcd.drawText(410, 15+82, string.format("%d@",(telemetry.homeAngle - 180) < 0 and telemetry.homeAngle + 180 or telemetry.homeAngle - 180), MIDSIZE+0+CUSTOM_COLOR)
+    -- HDG
+    lcd.setColor(CUSTOM_COLOR,0x0000)
+    lcd.drawText(410, 15+110, "Heading", SMLSIZE+0+CUSTOM_COLOR)
+    lcd.setColor(CUSTOM_COLOR,0xFFFF)
+    lcd.drawText(410, 15+122, string.format("%d@",telemetry.yaw), MIDSIZE+0+CUSTOM_COLOR)
+    -- home
+    lcd.setColor(CUSTOM_COLOR,0xFE60)
+    drawRArrow(410+28,15+175,22,math.floor(telemetry.homeAngle - telemetry.yaw),CUSTOM_COLOR)
+end
+
 return {
   drawNumberWithDim=drawNumberWithDim,
   drawHomeIcon=drawHomeIcon,
@@ -742,8 +850,11 @@ return {
   drawRArrow=drawRArrow,
   drawGauge=drawGauge,
   drawBar=drawBar,
+  updateBar=updateBar,
   drawMinMaxBar=drawMinMaxBar,
   drawGraph=drawGraph,
+  updateGraph=updateGraph,
+  resetGraph=resetGraph,
   computeOutCode=computeOutCode,
   drawLineWithClippingXY=drawLineWithClippingXY,
   drawLineWithClipping=drawLineWithClipping,
@@ -756,6 +867,8 @@ return {
   yawRibbonPoints=yawRibbonPoints,
   drawFenceStatus=drawFenceStatus,
   drawTerrainStatus=drawTerrainStatus,
-  drawCustomSensors=drawCustomSensors
+  drawCustomSensors=drawCustomSensors,
+  drawWindArrow=drawWindArrow,
+  drawLeftRightTelemetry=drawLeftRightTelemetry,
 }
 
