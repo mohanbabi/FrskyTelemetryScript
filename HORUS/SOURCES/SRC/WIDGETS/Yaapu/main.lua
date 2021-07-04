@@ -1725,6 +1725,8 @@ local function setSensorValues()
   if conf.enableRPM == 3 then
     setTelemetryValue(0x050F, 0, 0, telemetry.rpm2, 18 , 0 , "RPM2")
   end
+  --setTelemetryValue(0x070F, 0, 0, telemetry.roll, 20 , 0 , "ROLL")
+  --setTelemetryValue(0x071F, 0, 0, telemetry.pitch, 20 , 0 , "PTCH")   
 end
 
 utils.drawTopBar = function()
