@@ -1239,6 +1239,9 @@ local function setSensorValues()
   
   setTelemetryValue(0x050E, 0, 0, telemetry.rpm1, 18 , 0 , "RPM0")
   setTelemetryValue(0x050F, 0, 0, telemetry.rpm2, 18 , 0 , "RPM1")
+  
+  --setTelemetryValue(0x070F, 0, 0, telemetry.roll, 20 , 0 , "ROLL")
+  --setTelemetryValue(0x071F, 0, 0, telemetry.pitch, 20 , 0 , "PTCH")  
 end
 
 local function drawAllMessages()
@@ -1756,7 +1759,7 @@ local function init()
   clearTable(menuLib)
   menuLib = nil
 
-  pushMessage(7,"Yaapu 1.9.5dev".." ("..'155d296'..")")
+  pushMessage(7,"Yaapu 1.9.5dev".." ("..'2df1669'..")")
   collectgarbage()
   collectgarbage()
   playSound("yaapu")

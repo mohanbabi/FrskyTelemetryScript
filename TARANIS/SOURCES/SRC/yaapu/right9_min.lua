@@ -213,7 +213,6 @@ local function drawPane(x,drawLib,conf,telemetry,status,battery,battId,getMaxVal
   lcd.drawText(lcd.getLastRightPos(), 49, "Ah", SMLSIZE)
   --minmax
   if status.showMinMaxValues == true then
-    drawLib.drawVArrow(x+BATTVOLT_X+23,BATTVOLT_Y + 8, 4,false,true)
     drawLib.drawVArrow(x+59-3,23 + 8,4,true,false)
     drawLib.drawVArrow(x+17+33, 7 + 2 ,6,false,true)
   else
